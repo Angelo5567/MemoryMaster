@@ -1,0 +1,542 @@
+﻿import { useEffect, useState } from "react";
+import "./index.css";
+
+const BASE_GAMES = [
+  ["pairs","Coppie lampo","🃏","Visiva","Trova tutte le coppie."],
+  ["sequence","Sequenza flash","🔢","Sequenziale","Ripeti i numeri nell'ordine."],
+  ["color","Memoria cromatica","🎨","Visiva","Ricorda il colore mostrato."],
+  ["numbers","Codice segreto","🔐","Numerica","Ricostruisci il codice."],
+  ["words","Parole in fuga","📚","Verbale","Ricorda le parole viste."],
+  ["spatial","Griglia mentale","🧩","Spaziale","Ricorda le caselle illuminate."],
+  ["missing","Intruso scomparso","🔍","Visiva","Trova l'elemento che è sparito."],
+  ["order","Ordine perfetto","📋","Sequenziale","Ricostruisci l'ordine esatto."],
+  ["pattern","Pattern infinito","🔷","Logica","Completa il modello."],
+  ["symbols","Associazioni","✨","Associativa","Abbina simboli e significati."]
+];
+
+const VARIANTS = [
+  ["🧠","Allenamento classico"],["⚡","Riflessi mentali"],
+  ["🌙","Modalità zen"],["🔥","Sfida intensa"]
+];
+
+const GAMES = BASE_GAMES.flatMap((g,i)=>VARIANTS.map((v,j)=>({
+  id:`${g[0]}-${j}`,
+  type:g[0],
+  name:j===0?g[1]:`${g[1]} ${v[1]}`,
+  icon:j===0?g[2]:v[0],
+  category:g[3],
+  description:g[4],
+  variant:j,
+  index:i*4+j
+})));
+
+const BANDS = [
+  {id:0,name:"Principiante",subtitle:"Le basi della memoria",range:"01–10",color:"beginner",min:0,max:9},
+  {id:1,name:"Intermedio",subtitle:"Rafforza concentrazione e ricordo",range:"11–20",color:"intermediate",min:10,max:19},
+  {id:2,name:"Avanzato",subtitle:"Sfide mentali più impegnative",range:"21–30",color:"advanced",min:20,max:29},
+  {id:3,name:"Esperto",subtitle:"Metti alla prova i tuoi limiti",range:"31–40",color:"expert",min:30,max:39}
+];
+
+const SYMBOLS=["◆","●","▲","★","■","♥","✦","⬟","☀","☂","♣","♦","☯","♫","✿","✚","⚡","☘","❖","◉"];
+const WORDS=["MELA","MARE","LIBRO","SOLE","CASA","FIORE","TRENO","LUNA","PONTE","ALBERO","STELLA","NUVOLA","STRADA","PIANETA","MONTAGNA","GIARDINO","FINESTRA","VIAGGIO","OROLOGIO","CASTELLO"];
+const COLORS=["#ff5d8f","#ffc857","#41d6c3","#4e9cff","#a78bfa","#ff8c42","#8bd450","#f472b6","#5eead4","#c084fc","#f87171","#60a5fa"];
+const shuffle=a=>[...a].sort(()=>Math.random()-.5);
+const pick=(a,n)=>shuffle(a).slice(0,n);
+const rand=n=>Math.floor(Math.random()*n);
+const today=()=>new Date().toLocaleDateString("sv-SE");
+
+const emptyStats=()=>({
+  xp:0,games:0,bestScore:0,completed:{},history:[],
+  streak:0,lastDay:null,bestStreak:0,
+  daily:{day:null,count:0,rewarded:false},
+  levels:{},bandRewards:[]
+});
+
+function loadStats(){
+  try{
+    const saved=JSON.parse(localStorage.getItem("memorymaster-v3")||"{}");
+    const base=emptyStats();
+    return {
+      ...base,
+      ...saved,
+      completed:saved.completed||{},
+      history:saved.history||[],
+      levels:saved.levels||{},
+      daily:{...base.daily,...(saved.daily||{})},
+      bandRewards:saved.bandRewards||[]
+    };
+  }catch{return emptyStats()}
+}
+
+const difficulty=(level,variant)=>Math.min(10,Math.max(1,level+(variant===3?2:variant===1?1:0)));
+
+function getUnlockedBands(completed){
+  let unlocked=1;
+  for(let i=0;i<3;i++){
+    const band=BANDS[i];
+    const done=GAMES.filter(g=>g.index>=band.min&&g.index<=band.max)
+      .every(g=>(completed[g.id]||0)>0);
+    if(done)unlocked++;
+    else break;
+  }
+  return unlocked;
+}
+
+function createChallenge(game,level){
+  const d=difficulty(level,game.variant),type=game.type;
+
+  if(type==="pairs"){
+    const n=Math.min(4+d*2,20),vals=pick(SYMBOLS,n);
+    return {cards:shuffle([...vals,...vals]).map((value,id)=>({id,value}))};
+  }
+  if(type==="sequence"){
+    const n=3+d,seq=Array.from({length:n},()=>String(1+rand(9)));
+    const opts=new Set([seq.join(" ")]);
+    while(opts.size<4)opts.add(Array.from({length:n},()=>String(1+rand(9))).join(" "));
+    return {preview:seq,answer:seq.join(" "),options:shuffle([...opts]),seconds:Math.max(2,7-d/2)};
+  }
+  if(type==="color"){
+    const answer=COLORS[rand(COLORS.length)];
+    return {preview:answer,answer,options:shuffle([answer,...pick(COLORS.filter(x=>x!==answer),5)])};
+  }
+  if(type==="numbers"){
+    const n=3+d,answer=Array.from({length:n},()=>String(rand(10))).join("");
+    const opts=new Set([answer]);
+    while(opts.size<4)opts.add(Array.from({length:n},()=>String(rand(10))).join(""));
+    return {preview:answer,answer,options:shuffle([...opts])};
+  }
+  if(type==="words"){
+    const preview=pick(WORDS,Math.min(3+d,12)),answer=preview[rand(preview.length)];
+    return {preview,answer,options:shuffle([answer,...pick(WORDS.filter(x=>!preview.includes(x)),3)])};
+  }
+  if(type==="spatial"){
+    const n=Math.min(3+d,14),positions=pick(Array.from({length:25},(_,i)=>i),n).sort((a,b)=>a-b);
+    const answer=positions.join(",");
+    const opts=new Set([answer]);
+    while(opts.size<4)opts.add(pick(Array.from({length:25},(_,i)=>i),n).sort((a,b)=>a-b).join(","));
+    return {preview:positions,answer,options:shuffle([...opts])};
+  }
+  if(type==="missing"){
+    const preview=pick(SYMBOLS,Math.min(5+d,16)),answer=preview[rand(preview.length)];
+    return {preview,answer,options:shuffle([answer,...pick(SYMBOLS.filter(x=>!preview.includes(x)),3)])};
+  }
+  if(type==="order"){
+    const preview=pick(SYMBOLS,Math.min(4+d,12)),answer=preview.join(" ");
+    const opts=new Set([answer]);
+    while(opts.size<4)opts.add(shuffle(preview).join(" "));
+    return {preview,answer,options:shuffle([...opts])};
+  }
+  if(type==="pattern"){
+    const seq=pick(SYMBOLS,3),len=5+d;
+    const preview=Array.from({length:len},(_,i)=>seq[i%3]);
+    const answer=seq[len%3];
+    return {preview,answer,options:shuffle([answer,...pick(SYMBOLS.filter(x=>!seq.includes(x)),3)])};
+  }
+  const pairs=[["☀","SOLE"],["☂","PIOGGIA"],["♥","CUORE"],["★","STELLA"],["◆","DIAMANTE"],["●","CERCHIO"],["♫","MUSICA"],["⚡","ENERGIA"]];
+  const chosen=pairs[rand(pairs.length)];
+  return {preview:{symbol:chosen[0],word:chosen[1]},answer:chosen[1],options:shuffle([chosen[1],...pick(pairs.filter(x=>x!==chosen),3).map(x=>x[1])])};
+}
+
+export default function App(){
+  const [stats,setStats]=useState(loadStats);
+  const [screen,setScreen]=useState("home");
+  const [game,setGame]=useState(null);
+  const [level,setLevel]=useState(1);
+  const [challenge,setChallenge]=useState(null);
+  const [phase,setPhase]=useState("memorize");
+  const [seconds,setSeconds]=useState(0);
+  const [flipped,setFlipped]=useState([]);
+  const [matched,setMatched]=useState([]);
+  const [score,setScore]=useState(0);
+  const [result,setResult]=useState(false);
+  const [filter,setFilter]=useState("Tutti");
+  const [search,setSearch]=useState("");
+  const [previewLeft,setPreviewLeft]=useState(5);
+
+  useEffect(()=>{
+    localStorage.setItem("memorymaster-v3",JSON.stringify(stats));
+  },[stats]);
+
+  useEffect(()=>{
+    if(screen!=="game"||phase!=="playing")return;
+    const t=setInterval(()=>setSeconds(s=>s+1),1000);
+    return()=>clearInterval(t);
+  },[screen,phase]);
+
+  useEffect(()=>{
+    if(screen!=="game"||phase!=="memorize"||!challenge||!game)return;
+    const duration=game.type==="color"?5:game.type==="sequence"?challenge.seconds:0;
+    if(!duration)return;
+    setPreviewLeft(Math.ceil(duration));
+    const start=Date.now();
+    const t=setInterval(()=>{
+      const left=Math.max(0,Math.ceil(duration-(Date.now()-start)/1000));
+      setPreviewLeft(left);
+      if(left===0){clearInterval(t);setPhase("playing")}
+    },150);
+    return()=>clearInterval(t);
+  },[screen,phase,challenge,game]);
+
+  useEffect(()=>{
+    if(game?.type!=="pairs"||flipped.length!==2||!challenge)return;
+    const [a,b]=flipped;
+    const first=challenge.cards.find(c=>c.id===a);
+    const second=challenge.cards.find(c=>c.id===b);
+    if(!first||!second)return;
+    const t=setTimeout(()=>{
+      if(first.value===second.value){
+        const next=[...matched,a,b];
+        setMatched(next);
+        setFlipped([]);
+        if(next.length===challenge.cards.length)finishGame(true);
+      }else setFlipped([]);
+    },first.value===second.value?380:850);
+    return()=>clearTimeout(t);
+  },[flipped]);
+
+  const categories=["Tutti",...new Set(GAMES.map(g=>g.category))];
+  const visibleGames=GAMES.filter(g=>
+    (filter==="Tutti"||g.category===filter)&&
+    `${g.name} ${g.description}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const unlockedBands=getUnlockedBands(stats.completed);
+  const dailyCount=stats.daily?.day===today()?stats.daily.count:0;
+  const dailyDone=stats.daily?.day===today()&&stats.daily.rewarded;
+  const progress=(stats.xp%500)/5;
+
+  function startGame(selected,nextLevel){
+    const savedLevel=stats.levels?.[selected.id]||1;
+    const chosenLevel=nextLevel||savedLevel;
+    setGame(selected);
+    setLevel(chosenLevel);
+    setChallenge(createChallenge(selected,chosenLevel));
+    setSeconds(0);
+    setFlipped([]);
+    setMatched([]);
+    setScore(0);
+    setResult(false);
+    setPhase("memorize");
+    setScreen("game");
+  }
+
+  function finishGame(correct){
+    if(phase==="finished")return;
+
+    const baseEarned=correct?Math.max(15,55+level*12-seconds*2):5;
+    setScore(baseEarned);
+    setResult(correct);
+    setPhase("finished");
+
+    setStats(old=>{
+      const day=today();
+      const same=old.lastDay===day;
+      const previous=new Date(Date.now()-86400000).toLocaleDateString("sv-SE");
+      const streak=same?old.streak:old.lastDay===previous?old.streak+1:1;
+
+      const completed={...old.completed};
+      const firstCompletion=correct&&!(completed[game.id]>0);
+      if(correct)completed[game.id]=(completed[game.id]||0)+1;
+
+      const levels={...(old.levels||{})};
+      if(correct)levels[game.id]=Math.min(10,Math.max(level,levels[game.id]||1));
+
+      let bonus=firstCompletion?25:0;
+      const previousUnlocked=getUnlockedBands(old.completed);
+      const nextUnlocked=getUnlockedBands(completed);
+      const bandRewards=[...(old.bandRewards||[])];
+
+      if(nextUnlocked>previousUnlocked){
+        for(let band=previousUnlocked;band<nextUnlocked;band++){
+          if(!bandRewards.includes(band)){
+            bonus+=150;
+            bandRewards.push(band);
+          }
+        }
+      }
+
+      const todayCount=(old.daily?.day===day?old.daily.count:0)+1;
+      const alreadyRewarded=old.daily?.day===day&&old.daily.rewarded;
+      const dailyReward=todayCount>=3&&!alreadyRewarded;
+      if(dailyReward)bonus+=100;
+
+      const totalEarned=baseEarned+bonus;
+
+      return {
+        ...old,
+        xp:old.xp+totalEarned,
+        games:old.games+1,
+        bestScore:Math.max(old.bestScore,totalEarned),
+        completed,
+        levels,
+        bandRewards,
+        streak,
+        bestStreak:Math.max(old.bestStreak,streak),
+        lastDay:day,
+        daily:{day,count:todayCount,rewarded:alreadyRewarded||dailyReward},
+        history:[{
+          id:game.id,name:game.name,icon:game.icon,level,
+          score:totalEarned,correct,date:new Date().toLocaleString("it-IT"),
+          bonus
+        },...(old.history||[])].slice(0,50)
+      };
+    });
+  }
+
+  function checkAnswer(value){
+    if(phase==="playing")finishGame(String(value)===String(challenge.answer));
+  }
+
+  function flipCard(id){
+    if(phase!=="playing"||flipped.includes(id)||matched.includes(id)||flipped.length>=2)return;
+    setFlipped(old=>[...old,id]);
+  }
+
+  function renderBoard(positions,large=false){
+    return <div className={`mini-board ${large?"large-board":""}`}>
+      {Array.from({length:25},(_,i)=><span key={i} className={positions.includes(i)?"active-cell":""}/>)}
+    </div>;
+  }
+
+  function renderPreview(){
+    if(game.type==="pairs")return <>
+      <p className="instruction">Osserva la posizione delle carte: poi trovale tutte.</p>
+      <div className="memory-grid">{challenge.cards.map(c=><div key={c.id} className="memory-card revealed preview-card">{c.value}</div>)}</div>
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Sono pronto →</button>
+    </>;
+    if(game.type==="color")return <>
+      <p className="instruction">Memorizza il colore prima che scompaia.</p>
+      <div className="color-preview" style={{background:challenge.preview}}/>
+      <div className="countdown-label">Scompare tra {previewLeft}s</div>
+    </>;
+    if(game.type==="numbers")return <>
+      <p className="instruction">Memorizza ogni cifra, rispettando l'ordine.</p>
+      <div className="big-number">{challenge.preview}</div>
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Nascondi codice →</button>
+    </>;
+    if(game.type==="words")return <>
+      <p className="instruction">Memorizza tutte le parole che vedi.</p>
+      <div className="word-cloud">{challenge.preview.map(w=><span key={w}>{w}</span>)}</div>
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Ho memorizzato →</button>
+    </>;
+    if(game.type==="spatial")return <>
+      <p className="instruction">Ricorda le caselle illuminate nella griglia.</p>
+      {renderBoard(challenge.preview,true)}
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Nascondi schema →</button>
+    </>;
+    if(game.type==="symbols")return <>
+      <p className="instruction">Memorizza l'associazione simbolo-significato.</p>
+      <div className="big-symbol">{challenge.preview.symbol}</div>
+      <div className="big-number">{challenge.preview.word}</div>
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Nascondi →</button>
+    </>;
+    return <>
+      <p className="instruction">Osserva attentamente e memorizza.</p>
+      <div className="symbol-row">{challenge.preview.map((x,i)=><span key={i}>{x}</span>)}{game.type==="pattern"&&<span className="question-mark">?</span>}</div>
+      <button className="primary-button" onClick={()=>setPhase("playing")}>Ho memorizzato →</button>
+    </>;
+  }
+
+  function renderQuestion(){
+    if(game.type==="pairs")return <>
+      <h2>Trova tutte le coppie</h2>
+      <div className="memory-grid">{challenge.cards.map(c=>{
+        const open=flipped.includes(c.id)||matched.includes(c.id);
+        return <button key={c.id} className={`memory-card ${open?"revealed":""} ${matched.includes(c.id)?"matched":""}`} onClick={()=>flipCard(c.id)} disabled={phase!=="playing"||matched.includes(c.id)}>{open?c.value:"?"}</button>;
+      })}</div>
+      <p className="instruction">Coppie trovate: {matched.length/2} / {challenge.cards.length/2}</p>
+    </>;
+
+    const titles={
+      sequence:"Qual era la sequenza corretta?",color:"Quale colore hai visto?",
+      numbers:"Quale codice hai memorizzato?",words:"Quale parola era presente?",
+      spatial:"Quale schema hai visto?",missing:"Quale simbolo era presente?",
+      order:"Qual era l'ordine corretto?",pattern:"Quale simbolo completa il modello?",
+      symbols:"Qual era l'associazione?"
+    };
+
+    return <>
+      <h2>{titles[game.type]}</h2>
+      {game.type==="numbers"&&<div className="big-number hidden-number">••••••••</div>}
+      {game.type==="words"&&<div className="big-symbol">?</div>}
+      {game.type==="spatial"?
+        <div className="choice-grid spatial-choices">{challenge.options.map((o,i)=><button key={i} className="spatial-option" onClick={()=>checkAnswer(o)}>{renderBoard(o.split(",").map(Number))}</button>)}</div>:
+      game.type==="color"?
+        <div className="color-options">{challenge.options.map(c=><button key={c} className="color-choice" style={{background:c}} onClick={()=>checkAnswer(c)} aria-label="Scegli colore"/>)}</div>:
+        <div className="choice-grid">{challenge.options.map(o=><button key={o} className={`choice-button ${["pattern","missing"].includes(game.type)?"symbol-choice":""}`} onClick={()=>checkAnswer(o)}>{o}</button>)}</div>
+      }
+    </>;
+  }
+
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand"><div className="brand-icon">M</div><div><strong>MemoryMaster</strong><small>TRAIN YOUR MIND</small></div></div>
+      <nav>
+        <button className={`nav-item ${screen==="home"?"active":""}`} onClick={()=>setScreen("home")}><span>⌂</span> Dashboard</button>
+        <button className={`nav-item ${screen==="library"?"active":""}`} onClick={()=>setScreen("library")}><span>▦</span> 40 giochi</button>
+        <button className={`nav-item ${screen==="stats"?"active":""}`} onClick={()=>setScreen("stats")}><span>▥</span> Statistiche</button>
+      </nav>
+      <div className="sidebar-bottom"><div className="profile-avatar">🧠</div><div><strong>Il tuo profilo</strong><small>Streak: {stats.streak} giorni 🔥</small></div></div>
+    </aside>
+
+    <main className="main-content">
+      <header className="topbar">
+        <div><span className="eyebrow">IL TUO LABORATORIO MENTALE</span><h1>{screen==="game"?game?.name:screen==="stats"?"Le tue statistiche":screen==="library"?"Libreria giochi":"Dashboard"}</h1></div>
+        <div className="xp-pill">✦ {stats.xp} XP</div>
+      </header>
+
+      {screen==="home"&&<>
+        <section className="welcome-panel">
+          <div>
+            <span className="eyebrow">BENVENUTO SU MEMORYMASTER</span>
+            <h2>La tua mente.<br/>Il tuo prossimo livello.</h2>
+            <p>40 allenamenti, progressione permanente e sfide per trasformare ogni sessione in un nuovo record.</p>
+            <button className="primary-button" onClick={()=>setScreen("library")}>Esplora i 40 giochi <span>→</span></button>
+          </div>
+          <div className="welcome-art">🧠<i className="orbit orbit-one"/><i className="orbit orbit-two"/></div>
+        </section>
+
+        <section className="stats-grid">
+          <div className="stat-card"><span>Esperienza totale</span><strong>{stats.xp} <small>XP</small></strong><div className="progress-track"><div style={{width:`${progress}%`}}/></div><small>{500-(stats.xp%500)} XP al prossimo livello</small></div>
+          <div className="stat-card"><span>Giochi completati</span><strong>{stats.games}</strong><small>Sessioni totali</small></div>
+          <div className="stat-card"><span>Record personale</span><strong>{stats.bestScore} <small>XP</small></strong><small>Miglior punteggio</small></div>
+          <div className="stat-card"><span>Streak attuale</span><strong>{stats.streak} 🔥</strong><small>Record: {stats.bestStreak} giorni</small></div>
+        </section>
+
+        <section className="section-heading">
+          <div><span className="eyebrow">PARTI SUBITO</span><h2>Allenamenti consigliati</h2></div>
+          <button className="text-button" onClick={()=>setScreen("library")}>Tutti i giochi →</button>
+        </section>
+
+        <div className="mode-grid">{GAMES.filter(g=>g.index<10).slice(0,8).map(g=><button className="mode-card" key={g.id} onClick={()=>startGame(g)}><div className="mode-icon">{g.icon}</div><span className="mode-category">{g.category}</span><h3>{g.name}</h3><p>{g.description}</p><span className="card-arrow">↗</span></button>)}</div>
+
+        <section className="daily-panel">
+          <div><span className="eyebrow">OBIETTIVO DI OGGI</span><h2>🎯 Completa 3 allenamenti</h2><p>{dailyDone?"Obiettivo raggiunto! Hai ricevuto 100 XP bonus.":"Completa tre sessioni per ottenere 100 XP bonus."}</p></div>
+          <div className="daily-progress">
+            <strong>{dailyCount}/3</strong><span>sessioni di oggi</span>
+            <div className="progress-track"><div style={{width:`${Math.min(100,dailyCount/3*100)}%`}}/></div>
+          </div>
+        </section>
+
+        <section className="difficulty-band">
+          <div className="band-heading beginner">
+            <div className="band-number">↗</div>
+            <div className="band-title"><span className="eyebrow">PROGRESSIONE</span><h2>{unlockedBands}/4 fasce sbloccate</h2><p>Completa tutti i giochi di una fascia per accedere alla successiva.</p></div>
+          </div>
+        </section>
+      </>}
+
+      {screen==="library"&&<>
+        <p className="page-description">40 giochi divisi in quattro fasce. Completa tutti i giochi di una fascia per sbloccare quella successiva. Ogni gioco conserva il tuo livello.</p>
+        <div className="library-tools">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca un gioco..."/>
+          <select value={filter} onChange={e=>setFilter(e.target.value)}>{categories.map(c=><option key={c}>{c}</option>)}</select>
+        </div>
+
+        {BANDS.map(band=>{
+          const bandGames=visibleGames.filter(g=>g.index>=band.min&&g.index<=band.max);
+          if(!bandGames.length)return null;
+          const locked=band.id>=unlockedBands;
+          const allGames=GAMES.filter(g=>g.index>=band.min&&g.index<=band.max);
+          const completedCount=allGames.filter(g=>(stats.completed[g.id]||0)>0).length;
+
+          return <section className="difficulty-band" key={band.id}>
+            <div className={`band-heading ${band.color}`}>
+              <div className="band-number">{locked?"🔒":String(band.id+1).padStart(2,"0")}</div>
+              <div className="band-title">
+                <span className="eyebrow">FASCIA {band.id+1} · GIOCHI {band.range}</span>
+                <h2>{band.name}</h2><p>{locked?"Completa la fascia precedente per sbloccarla.":band.subtitle}</p>
+              </div>
+              <div className="band-count">{completedCount}/10<small>COMPLETATI</small></div>
+            </div>
+
+            <div className="band-levels">
+              <span>PROGRESSIONE FASCIA</span>
+              {Array.from({length:10},(_,i)=><span className={`level-dot ${allGames[i]&&(stats.completed[allGames[i].id]||0)>0?"completed":""}`} key={i}>{i+1}</span>)}
+              <small>{completedCount} su 10 giochi completati</small>
+            </div>
+
+            <div className="mode-grid library-grid">
+              {bandGames.map(g=>{
+                const gameLevel=stats.levels?.[g.id]||1;
+                const done=(stats.completed[g.id]||0)>0;
+                return <button className={`mode-card ${locked?"locked-game":""}`} key={g.id} disabled={locked} onClick={()=>startGame(g)}>
+                  <div className="mode-icon">{locked?"🔒":g.icon}</div>
+                  <span className="mode-category">{g.category} · Gioco {String(g.index+1).padStart(2,"0")}</span>
+                  <h3>{g.name}</h3><p>{locked?"Completa la fascia precedente per accedere.":g.description}</p>
+                  {!locked&&<small className="completed-count">{done?"✓ Gioco completato":"In corso"} · Livello {gameLevel}/10</small>}
+                  {!locked&&<div className="progress-track"><div style={{width:`${done?100:(gameLevel-1)*10}%`}}/></div>}
+                  <span className="card-arrow">{locked?"🔒":"↗"}</span>
+                </button>;
+              })}
+            </div>
+          </section>;
+        })}
+        {visibleGames.length===0&&<p className="empty-state">Nessun gioco trovato.</p>}
+      </>}
+
+      {screen==="game"&&game&&challenge&&<section className="game-panel">
+        <div className="game-topline">
+          <button className="back-button" onClick={()=>setScreen("library")}>← Tutti i giochi</button>
+          <span className="level-pill">LIVELLO {level}/10</span>
+          <button className="back-button" onClick={()=>startGame(game,level)}>↻ Ricomincia</button>
+        </div>
+        <div className="game-meta">
+          <span>⏱ {seconds}s</span><span>⚡ {game.category}</span>
+          <span>🎯 {game.type==="pairs"?`${matched.length/2}/${challenge.cards.length/2} coppie`:`Livello ${level}`}</span>
+        </div>
+        <div className="game-content">
+          {phase==="memorize"&&<><span className="phase-label">FASE 1 · MEMORIZZA</span><h2>Osserva attentamente</h2>{renderPreview()}</>}
+          {phase==="playing"&&<><span className="phase-label">FASE 2 · METTI ALLA PROVA LA MEMORIA</span>{renderQuestion()}</>}
+          {phase==="finished"&&<div className="result-panel">
+            <div className="result-icon">{result?"🏆":"🧩"}</div>
+            <span className="eyebrow">{result?"SFIDA SUPERATA":"ALLENAMENTO COMPLETATO"}</span>
+            <h2>{result?"Ottimo lavoro!":"Non mollare: riprova!"}</h2>
+            <p>{result?(level===10?"Hai raggiunto il livello massimo di questo gioco!":"Hai completato correttamente la sfida."):"La memoria migliora con la pratica. Riprova e supera il livello."}</p>
+            <div className="result-xp">+{stats.history[0]?.score||score} XP</div>
+            {result&&stats.history[0]?.bonus>0&&<p className="instruction">✨ Include {stats.history[0].bonus} XP di bonus!</p>}
+            {result&&<p className="instruction">Progresso salvato: livello {Math.min(10,level+1)}/10</p>}
+            <div className="result-actions">
+              <button className="primary-button" onClick={()=>startGame(game,result?Math.min(10,level+1):level)}>{result?(level===10?"Rigioca livello 10 ↻":"Livello successivo →"):"Riprova ↻"}</button>
+              <button className="secondary-button" onClick={()=>setScreen("library")}>Altri giochi</button>
+            </div>
+          </div>}
+        </div>
+      </section>}
+
+      {screen==="stats"&&<>
+        <section className="stats-grid stats-page-grid">
+          <div className="stat-card"><span>XP accumulati</span><strong>{stats.xp}</strong></div>
+          <div className="stat-card"><span>Partite</span><strong>{stats.games}</strong></div>
+          <div className="stat-card"><span>Streak migliore</span><strong>{stats.bestStreak} 🔥</strong></div>
+          <div className="stat-card"><span>Giochi completati</span><strong>{Object.values(stats.completed).filter(v=>v>0).length}/40</strong></div>
+        </section>
+
+        <section className="difficulty-band">
+          <div className="band-heading beginner">
+            <div className="band-number">🏅</div>
+            <div className="band-title"><span className="eyebrow">PROGRESSIONE GENERALE</span><h2>{unlockedBands} fasce sbloccate su 4</h2><p>{Object.values(stats.completed).filter(v=>v>0).length} giochi completati almeno una volta.</p></div>
+          </div>
+        </section>
+
+        <section className="history-panel">
+          <div className="section-heading"><div><span className="eyebrow">ATTIVITÀ RECENTE</span><h2>Ultimi allenamenti</h2></div></div>
+          {stats.history.length?stats.history.map((h,i)=><div className="history-row" key={`${h.date}-${i}`}>
+            <span className="history-icon">{h.icon}</span>
+            <div><strong>{h.name}</strong><small>Livello {h.level} · {h.date}</small></div>
+            <strong className="history-xp">+{h.score} XP</strong>
+          </div>):<p className="empty-state">Completa il tuo primo gioco per vedere le statistiche.</p>}
+        </section>
+
+        <button className="secondary-button reset-button" onClick={()=>{
+          if(confirm("Vuoi azzerare tutte le statistiche e i progressi? Questa operazione non può essere annullata.")){
+            setStats(emptyStats());
+            setScreen("home");
+          }
+        }}>Azzera statistiche e progressi</button>
+      </>}
+
+      <footer className="footer">MEMORYMASTER <span>✦</span> ALLENA LA TUA MENTE OGNI GIORNO</footer>
+    </main>
+  </div>;
+}
